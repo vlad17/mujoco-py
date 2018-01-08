@@ -1,4 +1,14 @@
 
+cdef void callback_step(mjModel* model, mjData* data, int nsubsteps,
+                        uintptr_t prestep_callback,
+                        uintptr_t poststep_callback) nogil:
+    if prestep_callback:
+        (<mjfGeneric> prestep_callback)(model, data)
+    for j in range(nsubsteps):
+        mj_step(model, data);
+    if poststep_callback:
+        (<mjfGeneric> poststep_callback)(model, data)
+
 cdef class MjSimPool(object):
     """
     Keeps a pool of multiple MjSims and enables stepping them quickly
@@ -15,13 +25,16 @@ cdef class MjSimPool(object):
     # Arrays of pointers to mjDatas and mjModels for fast multithreaded access
     cdef mjModel **_models
     cdef mjData **_datas
+    # Array of function pointers for pre and post step processing
+    cdef uintptr_t *_prestep_callbacks
+    cdef uintptr_t *_poststep_callbacks
+    # Number of frames per step
+    cdef int nsubsteps
 
     """
     The :class:`.MjSim` objects that are part of the pool.
     """
     cdef readonly list sims
-    # Number of .step substeps.
-    cdef readonly int nsubsteps
 
     def __cinit__(self, list sims, int nsubsteps=1):
         self.sims = sims
@@ -87,8 +100,8 @@ cdef class MjSimPool(object):
         with wrap_mujoco_warning():
             with nogil, parallel():
                 for i in prange(length, schedule='guided'):
-                    for j in range(self.nsubsteps):
-                        mj_step(self._models[i], self._datas[i]);
+                    callback_step(self._models[i], self._datas[i], self.nsubsteps,
+                                  self._prestep_callbacks[i], self._poststep_callbacks[i])
 
     @property
     def nsims(self):
@@ -117,11 +130,17 @@ cdef class MjSimPool(object):
     cdef _allocate_data_pointers(self):
         self._models = <mjModel**>malloc(self.nsims * sizeof(mjModel*))
         self._datas = <mjData**>malloc(self.nsims * sizeof(mjData*))
+        self._prestep_callbacks = <uintptr_t*>malloc(self.nsims * sizeof(uintptr_t))
+        self._poststep_callbacks = <uintptr_t*>malloc(self.nsims * sizeof(uintptr_t))
         for i in range(self.nsims):
             sim = <MjSim> self.sims[i]
             self._models[i] = sim.model.ptr
             self._datas[i] = sim.data.ptr
+            self._prestep_callbacks[i] = sim.prestep_callback_ptr
+            self._poststep_callbacks[i] = sim.poststep_callback_ptr
 
     def __dealloc__(self):
         free(self._datas)
         free(self._models)
+        free(self._prestep_callbacks)
+        free(self._poststep_callbacks)

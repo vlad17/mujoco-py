@@ -285,7 +285,7 @@ cdef extern from "mjdata.h" nogil:
 #---------------------------------- callback function types ----------------------------
 
 # generic MuJoCo function
-ctypedef void (*mjfGeneric)(const mjModel* m, mjData* d)
+ctypedef void (*mjfGeneric)(const mjModel* m, mjData* d) nogil
 
 # sensor simulation
 ctypedef void (*mjfSensor)(const mjModel* m, mjData* d, int stage)
